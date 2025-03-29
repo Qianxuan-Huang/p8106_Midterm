@@ -1,0 +1,295 @@
+---
+title: "midterm project"
+author: "Ruicong(Timothy) Du"
+date: "2025-03-30"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+we first need to load the required libraries and read our dataset
+ Load necessary library
+```{r}
+library(ggplot2)
+library(readr)
+library(tidymodels)  
+library(splines) 
+library(mgcv)
+library(caret)
+library(earth)
+library(pdp)
+library(gridExtra)
+library(plotly)
+library(patchwork)
+```
+
+Next, we need to transform the R datafile into CSV format and read the datafile
+```{r}
+load("dat1.RData")
+load("dat2.RData")
+
+# Save as CSVs
+write.csv(dat1, "dat1.csv", row.names = FALSE)
+write.csv(dat2, "dat2.csv", row.names = FALSE)
+
+dat1 = read_csv("dat1.csv",  na = c("NA","","."))
+dat2 = read_csv("dat2.csv",na = c("NA","","."))
+
+glimpse(dat1)
+glimpse(dat2)
+```
+
+Next, we will explore dat1 and perform Exploratory analysis
+```{r}
+dat1 %>% 
+  select(where(is.numeric)) %>% 
+  summary()
+
+# Count and proportion tables for categorical variables
+dat1 %>% 
+  select(gender, race, smoking, diabetes, hypertension) %>% 
+  map(~table(.))  
+
+dat1 %>% 
+  select(gender, race, smoking, diabetes, hypertension) %>% 
+  map(~prop.table(table(.)))  
+
+```
+
+Exploratory Visualizations:
+
+1. Visualize the distribution of log_antibody
+
+```{r}
+ggplot(dat1, aes(x = log_antibody)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "white") +
+  labs(title = "Distribution of Antibody Levels", x = "log_antibody", y = "Count") +
+  theme_minimal()
+```
+
+* log_antibody is approximately normally distributed and symmetric.
+* No major skewness or extreme outliers. 
+* Mean centered around 10.
+
+
+2. Scatterplot: log_antibody vs. time: See how antibody levels change over time post-vaccination.
+
+```{r}
+plot_ly(
+  data = dat1,
+  x = ~time,
+  y = ~log_antibody,
+  type = "scatter",
+  mode = "markers", marker = list(opacity = 0.3)
+) %>%
+  add_lines(
+    x = ~time,
+    y = ~fitted(loess(log_antibody ~ time, data = dat1)),
+    line = list(color = "red"),
+    name = "LOESS Smooth"
+  ) %>%
+  layout(
+    title = "Antibody Levels Over Time",
+    xaxis = list(title = "Time Since Vaccination (days)"),
+    yaxis = list(title = "log_antibody")
+  )
+```
+
+* Antibody levels increase initially, peak around day 75, then gradually decline.
+
+* Clear nonlinear relationship between log_antibody and time
+
+3. Boxplots by categorical variables: To compare antibody levels between different subgroups
+
+Gender
+```{r}
+p_gender = ggplot(dat1, aes(x = factor(gender), y = log_antibody)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Antibody Levels by Gender", x = "Gender (0 = Female, 1 = Male)", y = "log_antibody") +
+  theme_minimal()
+
+p_gender
+```
+
+* Females (0) tend to have slightly higher median antibody levels than males (1).
+* Distributions overlap but differ in central tendency.
+
+Smoking status
+```{r}
+p_smoking = ggplot(dat1, aes(x = factor(smoking), y = log_antibody)) +
+  geom_boxplot(fill = "plum") +
+  labs(title = "Antibody Levels by Smoking Status", x = "Smoking (0=Never, 1=Former, 2=Current)", y = "log_antibody") +
+  theme_minimal()
+
+p_smoking
+```
+* Never and former smokers have similar distributions, with slightly higher medians.
+* Current smokers tend to have slightly lower antibody levels.
+* Smoking status may have a modest effect on immune response.
+
+
+Diabetes
+```{r}
+p_diabetes = ggplot(dat1, aes(x = factor(diabetes), y = log_antibody)) +
+  geom_boxplot(fill = "salmon") +
+  labs(title = "Antibody Levels by Diabetes Status", x = "Diabetes (0 = No, 1 = Yes)", y = "log_antibody") +
+  theme_minimal()
+
+p_diabetes
+```
+
+* Very slight difference in medians.
+* Distributions are largely overlapping.
+* Diabetes might not have a strong effect on antibody levels in this sample.
+
+Race
+```{r}
+p_race = ggplot(dat1, aes(x = factor(race), y = log_antibody)) +
+  geom_boxplot(fill = "khaki") +
+  labs(
+    title = "Antibody Levels by Race",
+    x = "Race (1 = White, 2 = Asian, 3 = Black, 4 = Hispanic)",
+    y = "log_antibody"
+  ) +
+  theme_minimal()
+p_race
+```
+* No substantial differences across race groups.
+* Medians are nearly identical.
+* Interpretation:
+* Race may not be a strong predictor of antibody levels here.
+
+Hypertension status
+```{r}
+p_htn = ggplot(dat1, aes(x = factor(hypertension), y = log_antibody)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(
+    title = "Antibody Levels by Hypertension Status",
+    x = "Hypertension (0 = No, 1 = Yes)",
+    y = "log_antibody"
+  ) +
+  theme_minimal()
+p_htn
+```
+
+* Slight difference: non-hypertensive individuals may have slightly higher antibody levels.
+* Distributions are still very similar.
+
+We will creat a panel including all our categrical predictors analysis:
+```{r categorical-panel, fig.width=12, fig.height=8}
+(p_gender | p_race | p_smoking) /
+(p_diabetes | p_htn) 
+```
+
+4. Scatterplots with continuous predictors
+
+BMI
+```{r}
+p_bmi = ggplot(dat1, aes(x = bmi, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkgreen") +
+  labs(title = "Antibody levels by BMI", x = "BMI", y = "log_antibody") +
+  theme_minimal()
+
+p_bmi
+```
+* Antibody levels are relatively flat until ~25–28 BMI, then slightly decline.
+* Weak, nonlinear negative association at higher BMI.
+
+Antibody vs. Age
+```{r}
+p_age = ggplot(dat1, aes(x = age, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(title = "Antibody Levels by Age", x = "Age (years)", y = "log_antibody") +
+  theme_minimal()
+p_age
+```
+* Slight decline in antibody levels as age increases.
+* Smooth trend suggests a gradual, nonlinear effect.
+
+Antibody vs. Systolic Blood Pressure (SBP)
+```{r}
+p_sbp = ggplot(dat1, aes(x = SBP, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkred") +
+  labs(title = "Antibody Levels by Systolic Blood Pressure", x = "SBP (mmHg)", y = "log_antibody") +
+  theme_minimal()
+
+p_sbp
+```
+* No clear trend — curve is almost flat across the SBP range.
+* SBP appears to have minimal or no relationship with antibody levels.
+
+
+Antibody vs. LDL Cholesterol
+```{r}
+p_ldl = ggplot(dat1, aes(x = LDL, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "purple") +
+  labs(title = "Antibody Levels by LDL Cholesterol", x = "LDL (mg/dL)", y = "log_antibody") +
+  theme_minimal()
+
+p_ldl
+```
+
+* Nearly flat curve — no apparent association.
+* LDL likely not predictive of antibody response.
+
+```{r continuous-panel, fig.width=16, fig.height=6}
+(p_bmi | p_age) /
+(p_sbp | p_ldl)
+```
+
+
+Next step, we choose the GAM model training for option 1
+
+```{r}
+mod_gam_full = gam(
+  log_antibody ~ s(time) + s(age) + s(bmi) +
+    LDL + SBP +
+    gender + race + smoking + diabetes + hypertension,
+  data = dat1
+)
+
+summary(mod_gam_full)      
+plot(mod_gam_full, pages = 1)
+```
+All three smooth terms are highly significant (p < 2e-16)
+
+Time, age, and BMI have nonlinear relationships with log_antibody
+
+Their estimated degrees of freedom (edf):
+
+* s(time) = 7.86 → fairly wiggly
+
+* s(age) = 1.00 → almost linear
+
+* s(bmi) = 5.13 → moderately nonlinear
+
+Interpretation:Smooth terms for time, age, and BMI were statistically significant, indicating non-linear effects on antibody levels. The model automatically adapted flexibility for each predictor based on the data.
+
+Model performance of the traning set
+```{r}
+# Predict log_antibody in the test set
+pred_gam = predict(mod_gam_full, newdata = dat2)
+
+# True observed values
+true_values = dat2$log_antibody
+
+
+# Create a tibble with true and predicted values
+eval_df = tibble(
+  truth = dat2$log_antibody,
+  prediction = pred_gam
+)
+
+# Get multiple metrics at once
+metrics(eval_df, truth = truth, estimate = prediction)
+```
+Using the GAM model on this external dataset, the model achieved a root mean squared error (RMSE) of 0.539 and a mean absolute error (MAE) of 0.433, indicating modest prediction error. 
+The model explained approximately 17.1% of the variation in log-transformed antibody levels (R² = 0.171). While performance was not exceptionally high, this is consistent with the inherent complexity and noise in biological data. 
+The relatively stable performance across the two datasets suggests that the model generalizes reasonably well to new individuals.
