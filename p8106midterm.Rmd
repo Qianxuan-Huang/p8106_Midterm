@@ -235,13 +235,30 @@ p_ldl = ggplot(dat1, aes(x = LDL, y = log_antibody)) +
 
 p_ldl
 ```
+ Antibody vs weight and Antibody vs.height
+```{r}
+# Antibody vs Height
+p_height = ggplot(dat1, aes(x = height, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkorange") +
+  labs(title = "Antibody Levels by Height", x = "Height (cm)", y = "log_antibody")
+p_height
+# Antibody vs Weight
+p_weight = ggplot(dat1, aes(x = weight, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Antibody Levels by Weight", x = "Weight (kg)", y = "log_antibody")
+p_weight
+```
+
 
 * Nearly flat curve — no apparent association.
 * LDL likely not predictive of antibody response.
 
 ```{r continuous-panel, fig.width=16, fig.height=6}
 (p_bmi | p_age) /
-(p_sbp | p_ldl)
+(p_sbp | p_ldl)/
+(p_height | p_weight)
 ```
 
 
@@ -249,13 +266,16 @@ Next step, we choose the GAM model training for option 1
 
 ```{r}
 mod_gam_full = gam(
-  log_antibody ~ s(time) + s(age) + s(bmi) +
+  log_antibody ~ s(time) + s(age) + s(bmi) + s(height) + s(weight) +
     LDL + SBP +
     gender + race + smoking + diabetes + hypertension,
   data = dat1
 )
 
-summary(mod_gam_full)      
+
+summary(mod_gam_full)
+
+
 plot(mod_gam_full, pages = 1)
 ```
 All three smooth terms are highly significant (p < 2e-16)
@@ -264,11 +284,11 @@ Time, age, and BMI have nonlinear relationships with log_antibody
 
 Their estimated degrees of freedom (edf):
 
-* s(time) = 7.86 → fairly wiggly
+* s(time) = 7.99 → highly non-linear effect
 
 * s(age) = 1.00 → almost linear
 
-* s(bmi) = 5.13 → moderately nonlinear
+* s(bmi) = 5.14 → moderately nonlinear
 
 Interpretation:Smooth terms for time, age, and BMI were statistically significant, indicating non-linear effects on antibody levels. The model automatically adapted flexibility for each predictor based on the data.
 
@@ -290,6 +310,6 @@ eval_df = tibble(
 # Get multiple metrics at once
 metrics(eval_df, truth = truth, estimate = prediction)
 ```
-Using the GAM model on this external dataset, the model achieved a root mean squared error (RMSE) of 0.539 and a mean absolute error (MAE) of 0.433, indicating modest prediction error. 
-The model explained approximately 17.1% of the variation in log-transformed antibody levels (R² = 0.171). While performance was not exceptionally high, this is consistent with the inherent complexity and noise in biological data. 
+Using the GAM model on this external dataset, the model achieved a root mean squared error (RMSE) of 0.551 and a mean absolute error (MAE) of 0.440, indicating modest prediction error. 
+The model explained approximately 15.0% of the variation in log-transformed antibody levels (R² = 0.150). While performance was not exceptionally high, this is consistent with the inherent complexity and noise in biological data. 
 The relatively stable performance across the two datasets suggests that the model generalizes reasonably well to new individuals.
