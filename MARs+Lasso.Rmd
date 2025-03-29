@@ -1,0 +1,115 @@
+---
+title: 'Y'
+author: "Yuchen Gu"
+date: "2025-03-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(ggplot2)
+library(readr)
+library(tidymodels)  
+library(splines) 
+library(mgcv)
+library(caret)
+library(earth)
+library(pdp)
+library(gridExtra)
+library(plotly)
+library(patchwork)
+```
+
+```{r}
+# Import data
+load("dat1.RData")  
+load("dat2.RData")  
+
+# Data preprocessing
+training_data <- dat1 %>% 
+  select(-id) %>% 
+  drop_na()
+
+test_data <- dat2 %>% 
+  select(-id) %>% 
+  drop_na()
+
+# Prepare data matrices
+x_train <- model.matrix(log_antibody ~ ., training_data)[,-1]
+y_train <- training_data$log_antibody
+
+x_test <- model.matrix(log_antibody ~ ., test_data)[,-1]
+y_test <- test_data$log_antibody
+```
+
+## MARs:
+I chose the Multivariate Adaptive Regression Splines (MARS) model to analyze the antibody response data because it has several advantages. MARS can automatically detect non-linear relationships in the data, which is important since biological responses like antibody levels often do not follow simple linear patterns. This model can work with both continuous variables (age, BMI) and categorical variables (gender, smoking) at the same time. It also performs variable selection automatically to find which factors most strongly affect antibody levels. MARS uses hinge functions to find important thresholds in the data without needing to make assumptions about relationships beforehand.
+```{r}
+# Train MARS model
+set.seed(2025)
+mars_mod <- train(x = x_train,
+                 y = y_train,
+                 method = "earth",
+                 tuneGrid = expand.grid(degree = 1:3,
+                                       nprune = seq(2, 20, by = 2)),
+                 trControl = trainControl(method = "cv", number = 10))
+
+# Plot tuning results with ggplot
+ggplot(mars_mod) + 
+  ggtitle("MARS Model Tuning Results")
+
+# Print model summary
+print(summary(mars_mod$finalModel))
+
+# Make predictions on test data
+test_pred <- predict(mars_mod, newdata = x_test)
+
+# Calculate and print test error metrics
+test_rmse <- sqrt(mean((test_pred - y_test)^2))
+test_rsq <- cor(test_pred, y_test)^2
+cat("RMSE:", round(test_rmse, 4), "\n")
+cat("R-squared:", round(test_rsq, 4), "\n")
+```
+The model tuning results  show how the RMSE changes with different model complexity. The best model has nprune=8 and degree=1 (red line), which means that a simpler model without interaction terms works better for predicting antibody levels in this data.
+We can see the model coefficients for the final model. The intercept is 10.83, and there are negative effects for gender (-0.296) and smoking status (-0.203). This suggests males have lower antibody levels than females, and current smokers have lower levels than non-smokers. The model also found non-linear effects for age, BMI, and time since vaccination, shown by the hinge functions like h(age-59) and h(bmi-23.7). These indicate threshold points where the relationship changes.
+The model performance shows R-squared of 0.185, meaning the model explains about 18.5% of the variation in antibody levels. According to the importance ranking, BMI, gender, time since vaccination, age, and smoking status are the most important predictors of antibody response.RetryClaude can make mistakes. Please double-check responses.
+
+## Lasso
+
+```{r}
+ctrl1 <- trainControl(method = "cv", 
+                     number = 10, 
+                     selectionFunction = "best")
+
+# Train Lasso model
+set.seed(666)
+lasso_fit <- train(x = x_train,
+                  y = y_train,
+                  method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 1,
+                                         lambda = exp(seq(-15, 2, length = 100))),
+                  trControl = ctrl1)
+
+# Plot tuning results
+plot(lasso_fit, xTrans = log)
+
+# View best lambda
+lasso_fit$bestTune
+
+# View coefficients in the final model
+coef(lasso_fit$finalModel, lasso_fit$bestTune$lambda)
+
+# Make predictions on test data
+lasso_pred <- predict(lasso_fit, newdata = x_test)
+
+# Calculate test error
+lasso_rmse <- sqrt(mean((lasso_pred - y_test)^2))
+lasso_rsq <- cor(lasso_pred, y_test)^2
+cat("Lasso Test RMSE:", round(lasso_rmse, 4), "\n")
+cat("Lasso R-squared:", round(lasso_rsq, 4), "\n")
+```
+The tuning results illustrate how the cross-validation RMSE changes with different values of the regularization parameter (lambda). We can see that the RMSE remains relatively stable around 0.55 for a wide range of lambda values between e^-15 and e^-5, and then increases sharply as lambda approaches zero. This suggests that moderate regularization improves model performance by preventing overfitting.
+The coefficients from the final model reveal the relative importance of different predictors. BMI has the strongest negative association with antibody levels (-0.279), followed by gender (-0.297), indicating that males tend to have lower antibody responses than females. Smoking status, particularly current smoking (smoking2), shows a notable negative effect (-0.193). Other variables like height, weight, and race show smaller effects. The model achieved a test RMSE of 0.5684 and an R-squared of 0.1239, which indicates that approximately 12.4% of the variation in antibody response can be explained by the model. While this predictive power is moderate, the identified relationships provide valuable insights into factors affecting vaccine response.RetryClaude can make mistakes. Please double-check responses.
